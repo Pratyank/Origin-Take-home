@@ -12,7 +12,7 @@ npm install
 npm run triage   -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
 npm run validate -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
 npm run typecheck
-npm test          # unit tests: extraction, routing, and a safeguarding red-team set
+npm test          # extraction, routing, safeguarding red-team, behavior & draft-compliance, boundary
 ```
 
 Both commands also work with **no flags** and default to the paths above.
@@ -33,9 +33,9 @@ path (one small extraction call per item).
 - **Language/runtime:** TypeScript on Node LTS, run via `tsx`, npm. No build step.
 - **Validation:** the provided `ajv` JSON-schema validator + trace checks (unchanged).
 - **Tests:** Node's built-in `node:test` via `tsx` — no extra dependencies.
-- **Runtime LLM (optional):** Anthropic via `@anthropic-ai/sdk`, model
-  `claude-haiku-4-5` (override with `CLAUDE_MODEL`), used **only for intake-field
-  extraction**, with temperature 0 and prompt caching. If `ANTHROPIC_API_KEY` is
+- **Runtime LLM (optional):** Anthropic via `@anthropic-ai/sdk`, a Claude Haiku 4.5
+  snapshot (`claude-haiku-4-5-20251001` by default; override with `CLAUDE_MODEL`),
+  used **only for intake-field extraction**, with temperature 0 and prompt caching. If `ANTHROPIC_API_KEY` is
   unset, or any call errors/times out/returns malformed JSON, the agent silently
   falls back to deterministic extraction. The LLM never makes the triage decision.
 - **Assumptions:** the provided tools in `src/tools.ts` are the only side-effecting
