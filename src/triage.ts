@@ -115,7 +115,8 @@ async function handleScheduling(item: InboxItem, ex: Extraction): Promise<Decisi
   });
 
   const target = replyTarget(item, ex);
-  const body = `Hi ${firstName(ex.intake.parent_contact)}, thanks for letting us know ${child} can't make the appointment. We've noted the cancellation and a front-desk team member will follow up to arrange a new time. Nothing has been rescheduled yet. We hope ${child} feels better soon.`;
+  const childFirst = ex.intake.child_name ? firstName(ex.intake.child_name) : "your child";
+  const body = `Hi ${firstName(ex.intake.parent_contact)}, thanks for letting us know ${childFirst} can't make the appointment. We've noted the cancellation and a front-desk team member will follow up to arrange a new time. Nothing has been rescheduled yet. We hope ${childFirst} feels better soon.`;
   await draft_message({
     recipient: target.recipient,
     channel: target.channel,
