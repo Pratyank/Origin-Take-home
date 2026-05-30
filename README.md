@@ -1,4 +1,4 @@
-# Cedar Kids Therapy — Referral Inbox Triage Agent
+# Referral Inbox Triage Agent
 
 An AI agent prototype that turns a messy Monday inbox (pediatrician fax referrals,
 parent voicemails, portal messages, emails) into a sorted, **human-reviewable**
