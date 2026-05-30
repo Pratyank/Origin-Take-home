@@ -40,6 +40,12 @@ const SHOULD_FLAG = [
   "Su padre le pega cuando se enoja y tengo miedo.",
   "Su mamá lo deja solo todo el día.",
   "Creo que su papá la maltrata.",
+  // recall must survive the precision tightening
+  "Her dad hits her when he is angry.",
+  "He threatened to hurt her.",
+  // curly apostrophes (voicemail transcripts / phones produce U+2019)
+  "Their home isn’t safe.",
+  "She hasn’t eaten in two days at her dad’s.",
 ];
 
 // Routine messages that must NOT escalate — over-escalation is its own failure
@@ -54,6 +60,14 @@ const SHOULD_NOT_FLAG = [
   "He is afraid of the dark and the dog at home.",
   "The waiting room felt unsafe with the broken chair.",
   "No come bien, es muy quisquilloso con la comida.",
+  // over-firing the broadening introduced (bare tokens / possessive "her")
+  "My son loves violent video games.",
+  "He grabs her brother's toys during play.",
+  "He punches her pillow when he is upset.",
+  "He threatens to quit therapy if we make him go.",
+  "We want to keep him safe in the pool this summer.",
+  "Mi hijo abusa de los videojuegos.",
+  "La película tiene mucha violencia.",
 ];
 
 for (const body of SHOULD_FLAG) {

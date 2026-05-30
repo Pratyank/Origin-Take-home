@@ -83,10 +83,13 @@ All 8 tools are exercised across the batch. **Every item sets
 `requires_human_review = true`** — nothing is auto-sent or auto-scheduled.
 
 **Boundary hardening.** Raw items are normalized in `runAgent` (missing/mistyped
-fields coerced, unknown channels defaulted, a missing id given a positional
-fallback), and each item's handler is wrapped so an unexpected failure degrades to
-a human-review output rather than dropping the item or failing the batch — the
-"output for every item" floor holds even on malformed hidden variants.
+fields coerced, unknown channels defaulted), and each item's handler is wrapped so
+an unexpected failure degrades to a human-review output rather than dropping the
+item or failing the batch — the "output for every item" floor holds for malformed
+*field* values. (A truly id-less input item is a separate matter: the validator
+itself keys coverage off the input `id`, so it can't be satisfied without one; the
+agent assigns a positional fallback id so it still emits a row, but that case is
+inherently outside what `validate` can check.)
 
 **Draft replies** are clear, empathetic, concise, and operationally useful; they
 **never give clinical advice** (the clinical-question reply explicitly declines and
@@ -146,10 +149,11 @@ Insurance and out-of-network conflicts surface the billing-system status per pol
   time; the LLM path fails safe to deterministic instead.
 - **PHI handling / redaction.** Synthetic data only, per the brief.
 
-There **is** a focused test suite (`npm test`, 40 tests): extraction value checks,
+There **is** a focused test suite (`npm test`, 51 tests): extraction value checks,
 a safeguarding **red-team set** (English + Spanish adversarial phrasings the net
-must catch, with precision guards so dentist/baseball/feeding/"unsafe waiting room"
-do *not* escalate), **behavior tests** that drive the full agent and assert emitted
+must catch, with precision guards so dentist/baseball/feeding/violent-video-games/
+"unsafe waiting room" do *not* escalate, and curly-apostrophe transcripts still
+match), **behavior tests** that drive the full agent and assert emitted
 urgency + escalation, the insurance fork (out-of-network → billing, no slots;
 in-network → slots), a **draft-compliance test** (no draft implies a message was
 sent or an appointment booked; the clinical-question reply declines advice), and

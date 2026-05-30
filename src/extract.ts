@@ -137,17 +137,20 @@ const SAFEGUARDING_PATTERNS = [
   // explicit physical harm toward the child (anchored to a child object)
   "getting rough",
   "rough with (?:him|her|them|the)",
-  "(?:hit|hits|hitting|beat|beats|beating|slap|slaps|slapped|punch|punches|kick|kicks|choke|chokes|shoves?|grabs?|grabbed|whips?)\\s+(?:him|her|them|the (?:kid|child|baby)|my (?:son|daughter|child|kid))",
+  // physical-harm verbs: object is him/them (unambiguous) or "her" only when it
+  // is the object of the clause, not a possessive ("punches her pillow")
+  "(?:hit|hits|hitting|beat|beats|beating|slap|slaps|slapped|punch|punches|punching|kick|kicks|kicking|choke|chokes|whips?)\\s+(?:him|them|the (?:kid|child|baby)|my (?:son|daughter|child|kid)|her(?=\\s+(?:when|if|because|whenever|every|all|over|during|again|now|so|and|,|\\.|!|$)))",
   "hurt(?:s|ing)?\\s+(?:him|her|them)",
-  // abuse / neglect / violence terms (strong enough to stand alone)
+  // abuse / neglect terms (strong enough to stand alone)
   "abus(?:e|ive|ed)",
   "neglect(?:ed|ful)?",
   "mistreat(?:ed|ment)?",
   "maltreat(?:ed|ment)?",
   "molest(?:s|ed|ing)?",
+  // violence: anchored to a person/home, not movies/games/sports
   "domestic (?:violence|abuse)",
-  "violent",
-  "violence",
+  "(?:gets?|getting|got|turns?|becomes?|is|been|was) violent",
+  "violent (?:when|with|toward|towards|at home|outbursts?)",
   // injury signs
   "bruis(?:e|es|ed|ing)",
   "welts?",
@@ -173,8 +176,9 @@ const SAFEGUARDING_PATTERNS = [
   "unsafe\\s+(?:at home|at his|at her|around (?:him|her|them|dad|mom)|with (?:him|her|them|dad|mom))",
   "(?:home|house) (?:is|isn'?t|feels|felt)\\s*(?:not )?safe",
   "(?:not|isn'?t|aren'?t) safe\\s+(?:at home|with|around|there)",
-  "keep (?:him|her|them|the (?:child|kid|baby)) safe",
-  "threaten(?:s|ing|ed)?",
+  "(?:can'?t|cannot|couldn'?t|unable to|can no longer)\\s+keep (?:him|her|them|the (?:child|kid|baby)) safe",
+  "keep (?:him|her|them) safe (?:at home|from (?:his|her|their)|anymore)",
+  "threaten(?:s|ed|ing)?\\s+(?:to (?:hurt|hit|kill|harm|beat)|him|her|them|the (?:kid|child)|violence)",
   // Spanish harm / neglect / fear (the inbox includes Spanish-speaking families)
   "le pegan?",
   "le golpean?",
@@ -182,20 +186,23 @@ const SAFEGUARDING_PATTERNS = [
   "me pega",
   "maltrat[ao]",
   "maltrata",
-  "abus[ao]",
-  "abusan",
+  "abus[ao]\\b(?! de (?:los|las)\\b)",
+  "abusan de (?:[ée]l|ella|ellos|su)",
+  "violencia (?:dom[eé]stica|en casa|familiar)",
   "le hace da[ñn]o",
   "l[oa] lastima",
   "deja\\w*\\s+sol[oa]",
   "sol[oa]s?\\s+(?:en casa|todo el d[ií]a)",
   "miedo\\s+(?:de|a)\\s+su\\s+(?:pap|mam|padre|madre)",
-  "violencia",
   "pasa hambre",
   "no le dan de comer",
 ];
 const SAFEGUARDING = new RegExp(`\\b(?:${SAFEGUARDING_PATTERNS.join("|")})`, "i");
 
-function detectSignals(text: string, channel: string): TriageSignals {
+function detectSignals(rawText: string, channel: string): TriageSignals {
+  // Normalize curly/smart apostrophes (U+2019 etc.) to ASCII so patterns using
+  // "isn't"/"hasn't"/"can't" match transcripts from phones and voicemail tools.
+  const text = rawText.replace(/[‘’ʼ′]/g, "'");
   const lower = text.toLowerCase();
   const reschedule = /\b(reschedule|cancel|can'?t make|cannot make|can not make|move (?:my|the) appointment)\b/i.test(text);
   const sameDay = /\b(today|today'?s|this morning|this afternoon|hoy|right now)\b/i.test(text);
