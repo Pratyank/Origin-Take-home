@@ -94,8 +94,16 @@ async function handleSafeguarding(item: InboxItem, ex: Extraction): Promise<Deci
 /** Same-day reschedule/cancellation → P1 operational; do not reschedule, route to front desk. */
 async function handleScheduling(item: InboxItem, ex: Extraction): Promise<Decision> {
   const child = ex.intake.child_name || "the patient";
+  // Confirm the appointment belongs to a known patient before routing the
+  // reschedule; the match result is threaded into the task so the front desk
+  // knows whether identity still needs verifying.
+  let patientNote = "";
   if (ex.intake.dob_or_age?.match(/\d{4}-\d{2}-\d{2}/)) {
-    await search_patient({ name: child, dob: ex.intake.dob_or_age });
+    const found = await search_patient({ name: child, dob: ex.intake.dob_or_age });
+    patientNote =
+      found.data.length > 0
+        ? ` Matched existing patient ${found.data[0].patient_id} (${found.data[0].status}).`
+        : " No existing patient match — front desk to confirm identity.";
   }
   await lookup_policy({ topic: "scheduling" });
   const sameDay = ex.signals.sameDay;
@@ -103,7 +111,7 @@ async function handleScheduling(item: InboxItem, ex: Extraction): Promise<Decisi
     assignee: "front_desk",
     title: `${sameDay ? "Same-day " : ""}reschedule request: ${child}`,
     due: dueDate(item, 0),
-    notes: `Parent requests to ${/cancel/i.test(item.body) ? "cancel" : "reschedule"} an appointment for ${child}. Front desk to contact the family and arrange a new time. Agent did not reschedule.`,
+    notes: `Parent requests to ${/cancel/i.test(item.body) ? "cancel" : "reschedule"} an appointment for ${child}.${patientNote} Front desk to contact the family and arrange a new time. Agent did not reschedule.`,
   });
 
   const target = replyTarget(item, ex);

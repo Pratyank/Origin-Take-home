@@ -105,10 +105,17 @@ Insurance and out-of-network conflicts surface the billing-system status per pol
 - **LLM hallucination.** *Mitigation:* deterministic values win for present fields;
   the LLM only fills gaps; temperature 0; safeguarding is OR-gated so the LLM can
   only ever *raise* caution, never lower it.
-- **Safeguarding recall is the highest-stakes risk.** A missed disclosure is far
-  worse than a false alarm. The keyword net is deliberately broad; production needs
-  a labeled red-team set and a recall target near 100%, accepting some false
-  positives (which a human triages out).
+- **Safeguarding recall is the highest-stakes risk, and the deterministic net is
+  best-effort.** A missed disclosure is far worse than a false alarm. The keyword
+  net covers explicit English **and Spanish** harm/neglect/fear language with
+  precision guards (so "scared of the dentist", "feeding therapy", or an "unsafe
+  waiting room" don't escalate), and is pinned by a red-team test set
+  (`tests/safeguarding.test.ts`). **But regex recall is inherently bounded** —
+  subtler or novel phrasings ("he won't say why he flinches") depend on the LLM
+  flag, which is OR'd in. On the **no-key default path, recall is limited to what
+  the keyword set anticipates**; production needs the labeled red-team set wired
+  into CI with a recall target near 100% and the LLM (or a fine-tuned classifier)
+  as the primary detector, keywords as the floor.
 - **Over-escalation** is itself a failure mode; the agent defaults to P2 and only
   emits P0 for safeguarding and P1 for genuine same-day operational issues.
 - **Payer matching** relies on substring rules in the mock billing tool; a real
@@ -139,10 +146,14 @@ Insurance and out-of-network conflicts surface the billing-system status per pol
   time; the LLM path fails safe to deterministic instead.
 - **PHI handling / redaction.** Synthetic data only, per the brief.
 
-There **is** a focused test suite (`npm test`): extraction + routing on the visible
-items, a safeguarding **red-team set** (adversarial phrasings the keyword net must
-catch) with precision guards (dentist/baseball/feeding must *not* escalate), and
-boundary tests for malformed input. It is intentionally a slice, not full coverage —
+There **is** a focused test suite (`npm test`, 40 tests): extraction value checks,
+a safeguarding **red-team set** (English + Spanish adversarial phrasings the net
+must catch, with precision guards so dentist/baseball/feeding/"unsafe waiting room"
+do *not* escalate), **behavior tests** that drive the full agent and assert emitted
+urgency + escalation, the insurance fork (out-of-network → billing, no slots;
+in-network → slots), a **draft-compliance test** (no draft implies a message was
+sent or an appointment booked; the clinical-question reply declines advice), and
+malformed-input boundary tests. It is intentionally a slice, not full coverage —
 the deeper eval harness is §6.
 
 ## 6. What I would do with another 4 hours

@@ -18,8 +18,9 @@ function voicemail(body: string): InboxItem {
 const isSafeguarding = (body: string): boolean =>
   extractItem(voicemail(body)).signals.safeguarding;
 
-// Adversarial phrasings that vary the wording the original keyword list used.
-// The deterministic net must catch these even with no LLM key present.
+// Adversarial phrasings that vary the wording the original keyword list used,
+// plus cases an earlier review found the net MISSED (off-keyword English and
+// Spanish). The deterministic net must catch all of these with no LLM key.
 const SHOULD_FLAG = [
   "His dad started getting rough with him on the weekends.",
   "My husband hits him when he gets frustrated.",
@@ -31,16 +32,28 @@ const SHOULD_FLAG = [
   "There's domestic violence going on at home.",
   "My partner gets violent when he drinks.",
   "He's not being fed at his dad's place.",
+  // previously missed — English, off the original keyword list
+  "He flinches when his father comes home and won't say why.",
+  "She hasn't eaten in two days at her mom's.",
+  "He came in with marks on his arms.",
+  // previously missed — Spanish (the inbox serves Spanish-speaking families)
+  "Su padre le pega cuando se enoja y tengo miedo.",
+  "Su mamá lo deja solo todo el día.",
+  "Creo que su papá la maltrata.",
 ];
 
 // Routine messages that must NOT escalate — over-escalation is its own failure
-// mode, and feeding/sensory wording is normal OT-referral language.
+// mode. Includes cases an earlier review found the net WRONGLY flagged.
 const SHOULD_NOT_FLAG = [
   "He's scared of the dentist appointment next week.",
   "He hit a home run at his baseball game!",
   "We'd like an evaluation for feeding difficulties and sensory processing.",
   "She's been on the waitlist and left without a callback.",
   "He gets clingy and frustrated at drop-off.",
+  // previously false-positived
+  "He is afraid of the dark and the dog at home.",
+  "The waiting room felt unsafe with the broken chair.",
+  "No come bien, es muy quisquilloso con la comida.",
 ];
 
 for (const body of SHOULD_FLAG) {

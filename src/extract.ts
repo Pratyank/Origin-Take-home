@@ -134,16 +134,25 @@ function extractMemberId(text: string): string | null {
 // "feeding therapy") don't escalate. Subtler phrasings are caught by the LLM
 // layer's safeguarding flag, which is OR'd with this in src/llm.ts.
 const SAFEGUARDING_PATTERNS = [
+  // explicit physical harm toward the child (anchored to a child object)
   "getting rough",
   "rough with (?:him|her|them|the)",
-  "(?:hit|hits|hitting|beat|beats|beating|slap|slaps|slapped|punch|punches|kick|kicks|choke|chokes|shoves?|grabs?|grabbed)\\s+(?:him|her|them|the (?:kid|child|baby)|my (?:son|daughter|child|kid))",
+  "(?:hit|hits|hitting|beat|beats|beating|slap|slaps|slapped|punch|punches|kick|kicks|choke|chokes|shoves?|grabs?|grabbed|whips?)\\s+(?:him|her|them|the (?:kid|child|baby)|my (?:son|daughter|child|kid))",
   "hurt(?:s|ing)?\\s+(?:him|her|them)",
+  // abuse / neglect / violence terms (strong enough to stand alone)
   "abus(?:e|ive|ed)",
   "neglect(?:ed|ful)?",
   "mistreat(?:ed|ment)?",
-  "maltreat",
+  "maltreat(?:ed|ment)?",
+  "molest(?:s|ed|ing)?",
+  "domestic (?:violence|abuse)",
+  "violent",
+  "violence",
+  // injury signs
   "bruis(?:e|es|ed|ing)",
   "welts?",
+  "marks on (?:his|her|their|the)\\s+(?:arm|arms|body|back|legs?|face|neck)",
+  // neglect / unsafe supervision / deprivation
   "left (?:him|her|them) alone",
   "home alone",
   "alone all day",
@@ -152,18 +161,37 @@ const SAFEGUARDING_PATTERNS = [
   "going hungry",
   "no food (?:at home|in the house)",
   "starv(?:e|ed|ing|ation)?",
-  "locked (?:him|her|them )?(?:in|out|up)",
-  "(?:scared|afraid|frightened|terrified)\\b.{0,30}?\\b(?:dad|daddy|mom|mommy|father|mother|step-?dad|step-?mom|parent|home|house)",
+  "(?:hasn'?t|has not|haven'?t|have not)\\s+(?:eaten|been fed)",
+  "lock(?:s|ed|ing)? (?:him|her|them)? ?(?:in|up)",
+  // fear of a caregiver — anchored to a caregiver person or going home, NOT bare "home"
+  "(?:scared|afraid|frightened|terrified)\\b.{0,30}?\\b(?:dad|daddy|father|mom|mommy|mother|step-?dad|step-?mom|parents?|guardian|go home|going home)",
+  "flinch(?:es|ing)?\\b.{0,30}?\\b(?:dad|daddy|father|mom|mommy|mother|comes home|at home)",
+  // inappropriate contact
   "touched (?:him|her|them|me)(?: inappropriately)?",
-  "molest(?:s|ed|ing)?",
   "inappropriate(?:ly)? touch",
-  "violent",
-  "violence",
-  "domestic (?:violence|abuse)",
-  "unsafe",
-  "not safe",
-  "isn'?t safe",
+  // safety framed around the child/home — scoped so "unsafe waiting room" does NOT match
+  "unsafe\\s+(?:at home|at his|at her|around (?:him|her|them|dad|mom)|with (?:him|her|them|dad|mom))",
+  "(?:home|house) (?:is|isn'?t|feels|felt)\\s*(?:not )?safe",
+  "(?:not|isn'?t|aren'?t) safe\\s+(?:at home|with|around|there)",
+  "keep (?:him|her|them|the (?:child|kid|baby)) safe",
   "threaten(?:s|ing|ed)?",
+  // Spanish harm / neglect / fear (the inbox includes Spanish-speaking families)
+  "le pegan?",
+  "le golpean?",
+  "l[oa] golpea",
+  "me pega",
+  "maltrat[ao]",
+  "maltrata",
+  "abus[ao]",
+  "abusan",
+  "le hace da[ñn]o",
+  "l[oa] lastima",
+  "deja\\w*\\s+sol[oa]",
+  "sol[oa]s?\\s+(?:en casa|todo el d[ií]a)",
+  "miedo\\s+(?:de|a)\\s+su\\s+(?:pap|mam|padre|madre)",
+  "violencia",
+  "pasa hambre",
+  "no le dan de comer",
 ];
 const SAFEGUARDING = new RegExp(`\\b(?:${SAFEGUARDING_PATTERNS.join("|")})`, "i");
 
