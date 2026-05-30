@@ -40,9 +40,16 @@ const SHOULD_FLAG = [
   "Su padre le pega cuando se enoja y tengo miedo.",
   "Su mamá lo deja solo todo el día.",
   "Creo que su papá la maltrata.",
-  // recall must survive the precision tightening
+  // recall must survive the precision tightening — direct "[verb] her" disclosures
   "Her dad hits her when he is angry.",
   "He threatened to hurt her.",
+  "He hits her.",
+  "He hits her hard.",
+  "He punches her in the face.",
+  "Her father beats her with a belt.",
+  // active-voice neglect (named in the brief)
+  "His mom hasn't fed him in days.",
+  "The baby isn't being fed properly.",
   // curly apostrophes (voicemail transcripts / phones produce U+2019)
   "Their home isn’t safe.",
   "She hasn’t eaten in two days at her dad’s.",

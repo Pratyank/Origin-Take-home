@@ -149,7 +149,7 @@ Insurance and out-of-network conflicts surface the billing-system status per pol
   time; the LLM path fails safe to deterministic instead.
 - **PHI handling / redaction.** Synthetic data only, per the brief.
 
-There **is** a focused test suite (`npm test`, 51 tests): extraction value checks,
+There **is** a focused test suite (`npm test`, 57 tests): extraction value checks,
 a safeguarding **red-team set** (English + Spanish adversarial phrasings the net
 must catch, with precision guards so dentist/baseball/feeding/violent-video-games/
 "unsafe waiting room" do *not* escalate, and curly-apostrophe transcripts still

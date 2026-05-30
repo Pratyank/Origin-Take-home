@@ -139,7 +139,7 @@ const SAFEGUARDING_PATTERNS = [
   "rough with (?:him|her|them|the)",
   // physical-harm verbs: object is him/them (unambiguous) or "her" only when it
   // is the object of the clause, not a possessive ("punches her pillow")
-  "(?:hit|hits|hitting|beat|beats|beating|slap|slaps|slapped|punch|punches|punching|kick|kicks|kicking|choke|chokes|whips?)\\s+(?:him|them|the (?:kid|child|baby)|my (?:son|daughter|child|kid)|her(?=\\s+(?:when|if|because|whenever|every|all|over|during|again|now|so|and|,|\\.|!|$)))",
+  "(?:hit|hits|hitting|beat|beats|beating|slap|slaps|slapped|punch|punches|punching|kick|kicks|kicking|choke|chokes|choked|whips?)\\s+(?:him|them|the (?:kid|child|baby)|my (?:son|daughter|child|kid)|her(?!\\s+(?:pillow|toy|toys|doll|dolls|teddy|bear|blanket|brother|sister|sibling|cousin|friends?|hair|room|bed|stuff|things|snacks?|lunch|food|backpack|books?|crayons?|tablet|ipad|phone|own|grandma|grandpa|mom|mum|dad|teacher)))",
   "hurt(?:s|ing)?\\s+(?:him|her|them)",
   // abuse / neglect terms (strong enough to stand alone)
   "abus(?:e|ive|ed)",
@@ -160,11 +160,11 @@ const SAFEGUARDING_PATTERNS = [
   "home alone",
   "alone all day",
   "unsupervised",
-  "not (?:being )?fed",
+  "(?:not|isn'?t|aren'?t) (?:being )?fed",
   "going hungry",
   "no food (?:at home|in the house)",
   "starv(?:e|ed|ing|ation)?",
-  "(?:hasn'?t|has not|haven'?t|have not)\\s+(?:eaten|been fed)",
+  "(?:hasn'?t|has not|haven'?t|have not)\\s+(?:eaten|been fed|fed (?:him|her|them))",
   "lock(?:s|ed|ing)? (?:him|her|them)? ?(?:in|up)",
   // fear of a caregiver — anchored to a caregiver person or going home, NOT bare "home"
   "(?:scared|afraid|frightened|terrified)\\b.{0,30}?\\b(?:dad|daddy|father|mom|mommy|mother|step-?dad|step-?mom|parents?|guardian|go home|going home)",
