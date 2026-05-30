@@ -12,6 +12,7 @@ npm install
 npm run triage   -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
 npm run validate -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
 npm run typecheck
+npm test          # unit tests: extraction, routing, and a safeguarding red-team set
 ```
 
 Both commands also work with **no flags** and default to the paths above.
@@ -31,6 +32,7 @@ path (one small extraction call per item).
 
 - **Language/runtime:** TypeScript on Node LTS, run via `tsx`, npm. No build step.
 - **Validation:** the provided `ajv` JSON-schema validator + trace checks (unchanged).
+- **Tests:** Node's built-in `node:test` via `tsx` — no extra dependencies.
 - **Runtime LLM (optional):** Anthropic via `@anthropic-ai/sdk`, model
   `claude-haiku-4-5` (override with `CLAUDE_MODEL`), used **only for intake-field
   extraction**, with temperature 0 and prompt caching. If `ANTHROPIC_API_KEY` is
@@ -79,6 +81,12 @@ getting rough with him") is caught and escalated rather than scheduled.
 
 All 8 tools are exercised across the batch. **Every item sets
 `requires_human_review = true`** — nothing is auto-sent or auto-scheduled.
+
+**Boundary hardening.** Raw items are normalized in `runAgent` (missing/mistyped
+fields coerced, unknown channels defaulted, a missing id given a positional
+fallback), and each item's handler is wrapped so an unexpected failure degrades to
+a human-review output rather than dropping the item or failing the batch — the
+"output for every item" floor holds even on malformed hidden variants.
 
 **Draft replies** are clear, empathetic, concise, and operationally useful; they
 **never give clinical advice** (the clinical-question reply explicitly declines and
@@ -129,9 +137,13 @@ Insurance and out-of-network conflicts surface the billing-system status per pol
   *recommends* and *holds* for review; it must not schedule.
 - **Retries, backoff, structured-output tool use, confidence scoring.** Skipped for
   time; the LLM path fails safe to deterministic instead.
-- **Unit tests beyond the provided validator.** The validator + typecheck are the
-  safety net here; a real version would add extraction and routing unit tests.
 - **PHI handling / redaction.** Synthetic data only, per the brief.
+
+There **is** a focused test suite (`npm test`): extraction + routing on the visible
+items, a safeguarding **red-team set** (adversarial phrasings the keyword net must
+catch) with precision guards (dentist/baseball/feeding must *not* escalate), and
+boundary tests for malformed input. It is intentionally a slice, not full coverage —
+the deeper eval harness is §6.
 
 ## 6. What I would do with another 4 hours
 

@@ -127,7 +127,45 @@ function extractMemberId(text: string): string | null {
   ]);
 }
 
-const SAFEGUARDING = /\b(getting rough|rough with|hit(?:s|ting)? (?:him|her|them)|abuse|abusive|neglect|hurt(?:s|ing)? (?:him|her|them)|beats?|bruis|scared (?:of|at home)|afraid (?:of|at home)|unsafe|not safe|left alone|locked (?:in|out)|starv|slapp|spank|threaten)\b/i;
+// Safeguarding net. Deliberately broad on explicit harm language (recall over
+// precision — a missed disclosure is far worse than a human-reviewed false
+// alarm) while anchoring ambiguous words (scared/afraid, physical verbs) to a
+// caregiver/home context so routine messages (e.g. "scared of the dentist",
+// "feeding therapy") don't escalate. Subtler phrasings are caught by the LLM
+// layer's safeguarding flag, which is OR'd with this in src/llm.ts.
+const SAFEGUARDING_PATTERNS = [
+  "getting rough",
+  "rough with (?:him|her|them|the)",
+  "(?:hit|hits|hitting|beat|beats|beating|slap|slaps|slapped|punch|punches|kick|kicks|choke|chokes|shoves?|grabs?|grabbed)\\s+(?:him|her|them|the (?:kid|child|baby)|my (?:son|daughter|child|kid))",
+  "hurt(?:s|ing)?\\s+(?:him|her|them)",
+  "abus(?:e|ive|ed)",
+  "neglect(?:ed|ful)?",
+  "mistreat(?:ed|ment)?",
+  "maltreat",
+  "bruis(?:e|es|ed|ing)",
+  "welts?",
+  "left (?:him|her|them) alone",
+  "home alone",
+  "alone all day",
+  "unsupervised",
+  "not (?:being )?fed",
+  "going hungry",
+  "no food (?:at home|in the house)",
+  "starv(?:e|ed|ing|ation)?",
+  "locked (?:him|her|them )?(?:in|out|up)",
+  "(?:scared|afraid|frightened|terrified)\\b.{0,30}?\\b(?:dad|daddy|mom|mommy|father|mother|step-?dad|step-?mom|parent|home|house)",
+  "touched (?:him|her|them|me)(?: inappropriately)?",
+  "molest(?:s|ed|ing)?",
+  "inappropriate(?:ly)? touch",
+  "violent",
+  "violence",
+  "domestic (?:violence|abuse)",
+  "unsafe",
+  "not safe",
+  "isn'?t safe",
+  "threaten(?:s|ing|ed)?",
+];
+const SAFEGUARDING = new RegExp(`\\b(?:${SAFEGUARDING_PATTERNS.join("|")})`, "i");
 
 function detectSignals(text: string, channel: string): TriageSignals {
   const lower = text.toLowerCase();
