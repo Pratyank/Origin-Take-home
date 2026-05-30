@@ -201,7 +201,7 @@ async function handleMissingPaperwork(item: InboxItem, ex: Extraction): Promise<
 }
 
 const DISCIPLINE_LABEL: Record<Discipline, string> = {
-  SLP: "speech",
+  SLP: "speech therapy",
   OT: "occupational therapy",
   PT: "physical therapy",
 };
