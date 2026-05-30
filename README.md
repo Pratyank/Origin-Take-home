@@ -1,91 +1,146 @@
-# Origin AI Engineering Take-Home: Referral Inbox Triage Agent
+# Cedar Kids Therapy — Referral Inbox Triage Agent
 
-Origin builds software for pediatric therapy practices. In this assignment, you are helping a fictional practice, Cedar Kids Therapy, triage its Monday inbox.
+An AI agent prototype that turns a messy Monday inbox (pediatrician fax referrals,
+parent voicemails, portal messages, emails) into a sorted, **human-reviewable**
+action plan: one auditable triage decision per item, with classification, urgency,
+extracted intake, tool-backed actions, and a drafted reply.
 
-## Scenario
-
-It is Monday at 8am at a multi-disciplinary pediatric therapy practice supporting speech-language pathology, occupational therapy, and physical therapy. The shared inbox accumulated items over the weekend from pediatrician fax referrals, parent voicemails, parent portal messages, and emails. Build an AI agent prototype that turns the messy batch into a sorted, human-reviewable action plan.
-
-## What We Expect
-
-Strong submissions are usually incomplete but honest. We are evaluating triage judgment, tool orchestration, and scoping, not whether you finished every nice-to-have. Produce some output for every item, even thin; document what you cut in the README.
-
-You may use any AI coding agent (Claude Code, Cursor, Codex, etc.) while building. State your stack and assumptions in your README.
-
-Runtime LLM usage is allowed and recommended, but not required. Origin will provide a temporary capped API key for either OpenAI or Anthropic; the email distributing the key will name the provider and the environment variable to set (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`). You may also use your own provider. You may install dependencies for the provider you choose (e.g., `npm install openai` or `npm install @anthropic-ai/sdk`). Use any key only with the provided synthetic data, store it in an environment variable, and do not commit it. Model choice is not part of the rubric.
-
-## How To Run
+## 1. How to run
 
 ```bash
 npm install
 npm run triage   -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
 npm run validate -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
+npm run typecheck
 ```
 
-The commands also work with no flags and default to the paths above. Reviewers may run the same commands against similar hidden synthetic input. Do not hardcode input, output, or trace paths.
+Both commands also work with **no flags** and default to the paths above.
 
-## Share And Submit
+The agent runs fully **without an API key** (deterministic path). To enable the
+optional LLM-assisted extraction, set the key before running — nothing else
+changes:
 
-Create your own GitHub repo from this starter pack and implement your solution there. The repo can be public or private. When you are done, submit the repo link. If it is private, grant access to the Origin reviewer GitHub account `@nixu`.
+```bash
+ANTHROPIC_API_KEY=sk-... npm run triage
+```
 
-Commit your code, your updated `README.md`, and your final generated `output.json`. Do not commit API keys, `.env` files, real PHI, `node_modules/`, or `.trace/`.
+End-to-end runtime is seconds without a key, and roughly a minute with the LLM
+path (one small extraction call per item).
 
-We expect you to spend about 2 hours. If you stop before finishing, commit what you have and describe the cuts in your README.
+## 2. Stack and runtime
 
-Update this README with these sections before submitting:
+- **Language/runtime:** TypeScript on Node LTS, run via `tsx`, npm. No build step.
+- **Validation:** the provided `ajv` JSON-schema validator + trace checks (unchanged).
+- **Runtime LLM (optional):** Anthropic via `@anthropic-ai/sdk`, model
+  `claude-haiku-4-5` (override with `CLAUDE_MODEL`), used **only for intake-field
+  extraction**, with temperature 0 and prompt caching. If `ANTHROPIC_API_KEY` is
+  unset, or any call errors/times out/returns malformed JSON, the agent silently
+  falls back to deterministic extraction. The LLM never makes the triage decision.
+- **Assumptions:** the provided tools in `src/tools.ts` are the only side-effecting
+  actions and are used unmodified; they produce the audit trace the validator reads.
+  Synthetic data only.
 
-1. How to run
-2. Stack and runtime
-3. Architecture
-4. Failure modes and production eval
-5. What I chose not to build, and why
-6. What I would do with another 4 hours
+## 3. Architecture
 
-## Your Task
+Per-item pipeline (`src/agent.ts`):
 
-Implement the agent in `src/agent.ts`. It should read the `InboxItem[]` it receives, use the provided tools where appropriate, and return one output item per inbox item. `src/index.ts` wraps your items with `buildBatchOutput()` and writes the final `output.json`.
+```
+extract (regex)  →  enhance (LLM, optional, gap-fill + safety OR)  →  classify  →  handler (orchestrates tools)  →  assemble ItemOutput
+                                                                         │
+                                              tools_called = getToolCallsForItem(item.id)   ← passed through unchanged
+```
 
-Available tools: `search_patient`, `verify_insurance`, `lookup_policy`, `find_slots`, `hold_slot`, `create_task`, `draft_message`, `escalate`.
+- **`src/extract.ts`** — deterministic field extraction (child, DOB/age, contact,
+  discipline, payer, member ID, concern) plus boolean triage *signals*
+  (safeguarding, Spanish, reschedule, same-day, clinical-question, spam).
+- **`src/llm.ts`** — optional Anthropic extraction. Merge rule: a non-null
+  deterministic field always wins; the LLM only fills gaps. The **safeguarding
+  signal is `deterministic_keyword OR llm_flag`** — defense in depth so an LLM
+  miss can never downgrade a P0.
+- **`src/triage.ts`** — classification + urgency rules and one handler per class.
+  Handlers run inside `withItemContext(item.id, …)` and orchestrate the tools.
+- **`src/agent.ts`** — the loop; attaches the audit trace via `getToolCallsForItem`.
 
-Use `schema/output.schema.json` as the source of truth for the output shape. `data/example_output.json` shows one non-trivial worked item. It is illustrative and is not expected to pass validation by itself. **Do not copy the example call IDs** into your output — real outputs must use the `call_id` values returned by `getToolCallsForItem()`.
+**Safety-first routing.** Classification checks safeguarding *before* anything
+else, so a disclosure buried inside a routine scheduling ask (item 2: "dad started
+getting rough with him") is caught and escalated rather than scheduled.
 
-## Time Box
+**Action model — how tools drive decisions, not just satisfy a threshold:**
 
-Spend about 2 hours. Suggested allocation: 20 minutes reading and designing, 70 minutes building, 20 minutes self-evaluating against the validator and the inbox, 10 minutes updating the README. Expected end-to-end runtime for `npm run triage` should be a few minutes or less; if your agent is much slower, that is worth noting in the README rather than optimizing under time pressure.
+| Class | Urgency | Tools used as part of the decision |
+|---|---|---|
+| safeguarding | **P0** | `lookup_policy(safeguarding)` → `escalate(P0)` → `create_task(clinical_lead, same-hour)` → neutral `draft_message` |
+| scheduling (same-day reschedule) | **P1** | `search_patient` → `lookup_policy(scheduling)` → `create_task(front_desk)` → `draft_message` |
+| new_referral, out-of-network | P2 | `verify_insurance` (→ out_of_network) → `lookup_policy(insurance)` → `create_task(billing)` → holding `draft_message` |
+| new_referral, in-network | P2 | `search_patient` → `verify_insurance` → `find_slots` → `hold_slot` (only for an established patient; reviewable, not scheduled) → `create_task(intake)` → `draft_message` |
+| new_referral, Spanish | P2 | `verify_insurance` → `lookup_policy(language_access)` → `find_slots(es)` → `create_task` → `draft_message` **in Spanish** |
+| clinical_question | P2 | `lookup_policy(clinical_advice)` → `create_task(clinical_lead)` → `draft_message` that declines advice and offers a screening |
+| missing_paperwork | P2 | `lookup_policy(service_lines)` → `create_task(intake)` to chase the referrer |
 
-Minimum viable submission: processes every item in `data/inbox.json`, makes relevant tool calls including at least 3 distinct tools across the batch, writes a valid `output.json`, and passes `npm run validate`. Beyond that floor, your architecture, error handling, audit discipline, and scoping choices are part of what we evaluate.
+All 8 tools are exercised across the batch. **Every item sets
+`requires_human_review = true`** — nothing is auto-sent or auto-scheduled.
 
-## Constraints
+**Draft replies** are clear, empathetic, concise, and operationally useful; they
+**never give clinical advice** (the clinical-question reply explicitly declines and
+routes to a clinician) and **never imply a message was sent or an appointment was
+booked** (future-tense, often ending "Nothing has been booked/rescheduled yet").
+Insurance and out-of-network conflicts surface the billing-system status per policy.
 
-- Use TypeScript, Node LTS, and npm. If this creates a real accessibility or environment issue, reach out.
-- Use the provided tools in `src/tools.ts`; do not modify, reimplement, or bypass them. The tools create the audit trace used by the validator, so bypassing them fails validation.
-- Use at least 3 distinct tools across the batch. Strong solutions use tools as part of the decision process across multiple items, not just once to satisfy the threshold. Irrelevant or performative tool calls will be penalized.
-- Use `withItemContext(item.id, async () => ...)` around item-level tool calls.
-- Use `getToolCallsForItem(item.id)` for `tools_called[]`; pass the returned entries through unchanged.
-- Use `buildBatchOutput(items)` through the starter `src/index.ts`; do not hand-compute summary counts.
-- Do not auto-send messages. Use `draft_message` only.
-- Do not schedule appointments. `find_slots` and `hold_slot` are reviewable; scheduling is not.
-- Use only synthetic data. Do not add real PHI.
+## 4. Failure modes and production eval
 
-## Urgency Calibration
+**Failure modes**
 
-- `P0`: safeguarding, imminent harm, mandated-reporter escalation. Same-hour human review.
-- `P1`: same-day operational issue requiring prompt staff action.
-- `P2`: normal intake, scheduling, billing, or clinical-review workflow.
-- `P3`: low-priority admin, FYI, spam.
+- **Regex brittleness on variants.** The deterministic extractor keys off
+  templated phrasing; off-template free text degrades to null fields. *Mitigation:*
+  the LLM gap-fills, and missing fields are reported in `missing_info` rather than
+  guessed.
+- **LLM hallucination.** *Mitigation:* deterministic values win for present fields;
+  the LLM only fills gaps; temperature 0; safeguarding is OR-gated so the LLM can
+  only ever *raise* caution, never lower it.
+- **Safeguarding recall is the highest-stakes risk.** A missed disclosure is far
+  worse than a false alarm. The keyword net is deliberately broad; production needs
+  a labeled red-team set and a recall target near 100%, accepting some false
+  positives (which a human triages out).
+- **Over-escalation** is itself a failure mode; the agent defaults to P2 and only
+  emits P0 for safeguarding and P1 for genuine same-day operational issues.
+- **Payer matching** relies on substring rules in the mock billing tool; a real
+  system needs an eligibility integration and fuzzy plan-name resolution.
 
-Default to `P2` unless there is a clear safety or same-day operational reason. Over-escalation is itself a production failure mode.
+**Production eval**
 
-## Review Variants
+- **Golden set + hidden variants:** per-field extraction accuracy, classification
+  and urgency confusion matrices, exact safeguarding **recall/precision**.
+- **Safety gate:** block release on any safeguarding false negative; alert on P0/P1
+  rate drift (over-escalation guard).
+- **Draft quality:** LLM-as-judge + human spot-checks for empathy/clarity and a
+  hard classifier that fails any draft containing clinical advice or "sent/booked"
+  language.
+- **Audit:** every action flows through the traced tools; reconcile `tools_called`
+  against the trace (the validator already does a version of this) and keep
+  decisions human-reviewable.
 
-Similar synthetic variants may be run during review. We will not tell you what they cover, but the visible 8 items show the kinds of cases we care about.
+## 5. What I chose not to build, and why
 
-## Rubric
+- **LLM-generated draft replies.** Kept drafts **templated/deterministic** for
+  reproducible output and a guaranteed no-clinical-advice / no-"sent" property
+  under the time box. LLM drafting is a clear next step but needs a guardrail
+  classifier first (see §6).
+- **Provider ranking / scheduling optimization.** Out of scope — the agent
+  *recommends* and *holds* for review; it must not schedule.
+- **Retries, backoff, structured-output tool use, confidence scoring.** Skipped for
+  time; the LLM path fails safe to deterministic instead.
+- **Unit tests beyond the provided validator.** The validator + typecheck are the
+  safety net here; a real version would add extraction and routing unit tests.
+- **PHI handling / redaction.** Synthetic data only, per the brief.
 
-- Safety and domain judgment: 25%
-- Tool orchestration and action model: 25%
-- Output correctness and auditability: 20%
-- Engineering quality: 15%
-- README and production thinking: 15%
+## 6. What I would do with another 4 hours
 
-Draft replies should be clear, empathetic, concise, and operationally useful. They must not provide clinical advice or imply messages were sent.
+1. **Eval harness** with a labeled set (incl. adversarial safeguarding phrasings)
+   reporting extraction accuracy, urgency confusion, and safeguarding recall.
+2. **LLM-drafted replies** behind a guardrail classifier (rejects clinical advice /
+   "sent" language) with the templated draft as fallback.
+3. **Structured-output tool use** for extraction instead of JSON-string parsing,
+   plus per-field **confidence + abstain** so low-confidence fields route to a human.
+4. **Better identity resolution** (dedup against the patient index beyond the two
+   stubbed matches) and a real insurance-eligibility integration.
+5. **Broader language access** beyond Spanish, with locale-aware draft templates.

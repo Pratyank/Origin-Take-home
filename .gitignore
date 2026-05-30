@@ -8,3 +8,10 @@ _internal/
 .env.*
 !.env.example
 *.log
+
+# Local agent tooling (claude-flow / hive-mind) — not part of the deliverable
+.claude/
+.claude-flow/
+.hive-mind/
+.mcp.json
+CLAUDE.md

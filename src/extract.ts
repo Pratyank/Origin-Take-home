@@ -1,0 +1,172 @@
+import type { Discipline, ExtractedIntake, InboxItem } from "./types.js";
+
+export interface TriageSignals {
+  /** A disclosure suggesting harm, abuse, neglect, or unsafe caregiving. */
+  safeguarding: boolean;
+  /** Family is communicating in / requesting Spanish. */
+  spanish: boolean;
+  /** A reschedule or cancellation request for an existing appointment. */
+  reschedule: boolean;
+  /** The request concerns something happening today (same-day operational). */
+  sameDay: boolean;
+  /** A developmental / clinical-advice question rather than a referral. */
+  clinicalQuestion: boolean;
+  /** Looks like spam or an FYI with no action. */
+  spam: boolean;
+}
+
+export interface Extraction {
+  intake: ExtractedIntake;
+  signals: TriageSignals;
+  /** Human-readable field names that are missing and needed for intake. */
+  missing: string[];
+}
+
+const BLANK = /^\s*(\[?\s*blank\s*\]?|n\/a|none|unknown|-+)\s*$/i;
+
+function clean(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim().replace(/[.;,]+$/, "").trim();
+  if (!trimmed || BLANK.test(trimmed)) return null;
+  return trimmed;
+}
+
+function firstMatch(text: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const m = text.match(pattern);
+    if (m && m[1]) {
+      const value = clean(m[1]);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+const NAME = "[A-Z][A-Za-z'’-]+";
+
+function extractChildName(text: string, subject: string): string | null {
+  return firstMatch(`${text}\n${subject}`, [
+    new RegExp(`Child:\\s*(${NAME}(?:\\s+${NAME}){0,3})`),
+    new RegExp(`(?:referral for|eval(?:uation)? for)\\s+(${NAME}(?:\\s+${NAME}){0,2})`),
+    new RegExp(`(?:my (?:son|daughter|child|hij[ao])|mi hij[ao])\\s+(${NAME}(?:\\s+${NAME}){0,2})`),
+    /year[\s-]old\s+([A-Z][a-z]+)/,
+    new RegExp(`(${NAME}(?:\\s+${NAME})?)\\s+threw up`),
+  ]);
+}
+
+function extractDobOrAge(text: string): string | null {
+  const dob = firstMatch(text, [
+    /DOB:?\s*(\d{4}-\d{2}-\d{2})/i,
+    /DOB\s+(?:is\s+)?(\d{4}-\d{2}-\d{2})/i,
+    /\bDOB:?\s*([A-Za-z0-9 ,/-]+\d{4})/i,
+  ]);
+  if (dob) return dob;
+
+  const age = firstMatch(text, [
+    /(\d{1,2})[\s-]*year[\s-]*old/i,
+    /(?:he|she|is|tiene)\s+(?:is\s+)?(\d{1,2})\b(?!\d)/i,
+    /tiene\s+(\d{1,2})\s+a[nñ]os/i,
+  ]);
+  if (age) return `age ${age}`;
+  if (/school-age/i.test(text)) return "school-age (unspecified)";
+  return null;
+}
+
+function extractContact(text: string, sender: string): string | null {
+  const phone = firstMatch(text, [/\b(\d{3}-\d{3}-\d{4})\b/, /\b(\d{3}-\d{4})\b/]);
+  const email = firstMatch(`${text}\n${sender}`, [/([\w.+-]+@[\w-]+\.[\w.-]+)/]);
+  const name = firstMatch(`${text}\n${sender}`, [
+    new RegExp(`Parent(?:/guardian)?:\\s*(${NAME}(?:\\s+${NAME}){0,2})`),
+    new RegExp(`I am (?:his|her|their) parent,?\\s*(${NAME}(?:\\s+${NAME}){0,2})`),
+    new RegExp(`(?:this is|soy)\\s+(${NAME}(?:\\s+${NAME}){0,2})`),
+    new RegExp(`^(${NAME}(?:\\s+${NAME}){0,2})\\s*<`, "m"),
+    new RegExp(`^(${NAME}(?:\\s+${NAME}){0,2})\\s+via`, "m"),
+  ]);
+  const parts = [name, phone, email].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
+}
+
+const DISCIPLINE_HINTS: Array<[Discipline, RegExp]> = [
+  ["SLP", /\b(slp|speech|speech-language|articulation|intelligibilit|language delay|stutter|r sounds|habla|lenguaje)\b/i],
+  ["OT", /\b(ot|occupational|sensory|feeding|fine motor|handwriting|self-regulation|self regulation)\b/i],
+  ["PT", /\b(pt|physical therapy|gait|toe walking|tripping|balance|gross motor|walking)\b/i],
+];
+
+function extractDiscipline(text: string): Discipline[] | null {
+  const explicit = text.match(/Discipline requested:\s*(SLP|OT|PT)/i);
+  const found = new Set<Discipline>();
+  if (explicit) found.add(explicit[1].toUpperCase() as Discipline);
+  for (const [discipline, pattern] of DISCIPLINE_HINTS) {
+    if (pattern.test(text)) found.add(discipline);
+  }
+  return found.size ? [...found] : null;
+}
+
+function extractConcern(text: string): string | null {
+  return firstMatch(text, [
+    /(?:Concern|Diagnosis\/concern|Diagnosis or concern):\s*([^.\n]+)/i,
+    /(?:evaluation|eval) for\s+([^.\n]+)/i,
+    /Necesita una?\s+([^.\n]+)/i,
+  ]);
+}
+
+function extractPayer(text: string): string | null {
+  const labeled = firstMatch(text, [
+    /Insurance(?: is)?:?\s*([^.,\n]+)/i,
+    /Tenemos\s+([A-Za-z ]+?)(?:,|\.)/i,
+  ]);
+  if (labeled) return labeled;
+  if (/\bmedicaid\b/i.test(text)) return "Medicaid";
+  return null;
+}
+
+function extractMemberId(text: string): string | null {
+  return firstMatch(text, [
+    /member\s*id:?\s*([A-Z0-9][A-Z0-9-]+)/i,
+    /miembro\s+([A-Z0-9][A-Z0-9-]+)/i,
+  ]);
+}
+
+const SAFEGUARDING = /\b(getting rough|rough with|hit(?:s|ting)? (?:him|her|them)|abuse|abusive|neglect|hurt(?:s|ing)? (?:him|her|them)|beats?|bruis|scared (?:of|at home)|afraid (?:of|at home)|unsafe|not safe|left alone|locked (?:in|out)|starv|slapp|spank|threaten)\b/i;
+
+function detectSignals(text: string, channel: string): TriageSignals {
+  const lower = text.toLowerCase();
+  const reschedule = /\b(reschedule|cancel|can'?t make|cannot make|can not make|move (?:my|the) appointment)\b/i.test(text);
+  const sameDay = /\b(today|today'?s|this morning|this afternoon|hoy|right now)\b/i.test(text);
+  return {
+    safeguarding: SAFEGUARDING.test(text),
+    spanish: /\b(hola|soy|necesita|gracias|espa[nñ]ol|mi hij[ao]|tel[eé]fono|a[nñ]os)\b/i.test(text),
+    reschedule,
+    sameDay,
+    clinicalQuestion:
+      /\b(is it normal|is this normal|normal that|should i be worried|should we wait|do you think|is it concerning)\b/i.test(
+        text,
+      ) && !/Discipline requested|referral/i.test(text),
+    spam:
+      /\b(unsubscribe|limited time offer|click here|congratulations you|viagra|crypto)\b/i.test(lower) &&
+      channel === "email",
+  };
+}
+
+export function extractItem(item: InboxItem): Extraction {
+  const text = `${item.subject}\n${item.body}`;
+  const intake: ExtractedIntake = {
+    child_name: extractChildName(item.body, item.subject),
+    dob_or_age: extractDobOrAge(text),
+    parent_contact: extractContact(item.body, item.sender),
+    discipline: extractDiscipline(text),
+    diagnosis_or_concern: extractConcern(text),
+    payer: extractPayer(text),
+    member_id: extractMemberId(text),
+  };
+
+  const missing: string[] = [];
+  if (!intake.child_name) missing.push("child name");
+  if (!intake.dob_or_age) missing.push("date of birth or age");
+  if (!intake.parent_contact) missing.push("parent/guardian contact");
+  if (!intake.discipline) missing.push("requested discipline");
+  if (!intake.payer) missing.push("insurance payer");
+  if (!intake.member_id) missing.push("insurance member ID");
+
+  return { intake, signals: detectSignals(text, item.channel), missing };
+}
