@@ -8,7 +8,7 @@
     "validate": "tsx src/validate.ts",
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "package": "tar -czf take-home.tgz README.md package.json package-lock.json tsconfig.json .gitignore data/inbox.json data/policies.md data/providers.json data/example_output.json schema/output.schema.json output.json src/agent.ts src/extract.ts src/triage.ts src/llm.ts src/index.ts src/tools.ts src/types.ts src/validate.ts tests/extraction.test.ts tests/safeguarding.test.ts tests/robustness.test.ts tests/behavior.test.ts"
+    "package": "tar -czf take-home.tgz README.md package.json package-lock.json tsconfig.json .gitignore data/inbox.json data/policies.md data/providers.json data/example_output.json schema/output.schema.json output.json src/agent.ts src/extract.ts src/triage.ts src/llm.ts src/index.ts src/tools.ts src/types.ts src/validate.ts tests/extraction.test.ts tests/safeguarding.test.ts tests/robustness.test.ts tests/behavior.test.ts tests/draft-contract.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

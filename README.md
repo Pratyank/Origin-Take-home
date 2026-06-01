@@ -12,7 +12,7 @@ npm install
 npm run triage   -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
 npm run validate -- --input data/inbox.json --output output.json --trace .trace/tool-calls.jsonl
 npm run typecheck
-npm test          # extraction, routing, safeguarding red-team, behavior & draft-compliance, boundary
+npm test          # extraction, routing, safeguarding red-team, behavior, draft↔tool contract, boundary
 ```
 
 Both commands also work with **no flags** and default to the paths above.
@@ -97,6 +97,16 @@ routes to a clinician) and **never imply a message was sent or an appointment wa
 booked** (future-tense, often ending "Nothing has been booked/rescheduled yet").
 Insurance and out-of-network conflicts surface the billing-system status per policy.
 
+**Draft↔tool contract.** Every confident factual claim in a draft is gated on a
+tool result or an established caller identity: coverage is called "verified" only
+when `verify_insurance` returns in-network; a Spanish-speaking provider is promised
+only when `find_slots` surfaces one; prior-authorization and expired-vs-out-of-network
+states reflect the actual `verify_insurance` return; and a caller whose name doesn't
+match the guardian on record (`search_patient`) is reconciled before coverage is
+discussed. Where the tools or identity don't support a claim, the gap is surfaced in
+the higher-visibility fields (`recommended_next_action`, `missing_info`) — not just
+`decision_rationale`.
+
 ## 4. Failure modes and production eval
 
 **Failure modes**
@@ -149,16 +159,18 @@ Insurance and out-of-network conflicts surface the billing-system status per pol
   time; the LLM path fails safe to deterministic instead.
 - **PHI handling / redaction.** Synthetic data only, per the brief.
 
-There **is** a focused test suite (`npm test`, 57 tests): extraction value checks,
+There **is** a focused test suite (`npm test`, 67 tests): extraction value checks,
 a safeguarding **red-team set** (English + Spanish adversarial phrasings the net
 must catch, with precision guards so dentist/baseball/feeding/violent-video-games/
 "unsafe waiting room" do *not* escalate, and curly-apostrophe transcripts still
 match), **behavior tests** that drive the full agent and assert emitted
 urgency + escalation, the insurance fork (out-of-network → billing, no slots;
 in-network → slots), a **draft-compliance test** (no draft implies a message was
-sent or an appointment booked; the clinical-question reply declines advice), and
-malformed-input boundary tests. It is intentionally a slice, not full coverage —
-the deeper eval harness is §6.
+sent or an appointment booked; the clinical-question reply declines advice), a
+**draft↔tool contract suite** (`tests/draft-contract.test.ts`) that asserts every
+confident draft claim is backed by tool state or caller identity and surfaces any
+gap in a high-visibility field, and malformed-input boundary tests. It is
+intentionally a slice, not full coverage — the deeper eval harness is §6.
 
 ## 6. What I would do with another 4 hours
 

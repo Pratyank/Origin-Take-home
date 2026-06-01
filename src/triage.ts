@@ -47,6 +47,41 @@ function firstName(full: string | null): string {
   return full?.trim().split(/\s+/)[0] || "there";
 }
 
+/** A salutation first name for the caller, or "there" when we only have a phone
+ * or email and no actual name — never address someone by a contact handle. */
+function greetingName(contact: string | null): string {
+  return firstName(parentName(contact));
+}
+
+/** The name segment of a parent_contact string ("Carla Mendez, 555-…, a@b") if
+ * the leading segment is a name rather than a phone/email; null otherwise. */
+function parentName(contact: string | null): string | null {
+  if (!contact) return null;
+  const first = contact.split(",")[0].trim();
+  if (!first || /@/.test(first) || /\d{3}-?\d{3,4}/.test(first)) return null;
+  return first;
+}
+
+/** True when two person names share no name token — i.e. they look like
+ * different people. Conservative: any shared token (e.g. a surname, or a first
+ * name when only one is given) counts as a match, not a conflict. */
+function namesConflict(a: string | null, b: string | null): boolean {
+  const tokens = (s: string): Set<string> =>
+    new Set(
+      s
+        .toLowerCase()
+        .replace(/[^a-zñáéíóú\s]/gi, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 1 && !["jr", "sr", "ii", "iii", "iv"].includes(t)),
+    );
+  if (!a || !b) return false;
+  const ta = tokens(a);
+  const tb = tokens(b);
+  if (ta.size === 0 || tb.size === 0) return false;
+  for (const t of ta) if (tb.has(t)) return false;
+  return true;
+}
+
 /** Safeguarding disclosure → P0, escalate to clinical lead, neutral acknowledgement only. */
 async function handleSafeguarding(item: InboxItem, ex: Extraction): Promise<Decision> {
   const child = ex.intake.child_name || "the child";
@@ -65,7 +100,7 @@ async function handleSafeguarding(item: InboxItem, ex: Extraction): Promise<Deci
   });
 
   const target = replyTarget(item, ex);
-  const body = `Hi ${firstName(ex.intake.parent_contact)}, thank you for reaching out about ${child}. A member of our clinical team will contact you today to follow up and talk through next steps for an evaluation. We want to make sure ${child} gets the right support.`;
+  const body = `Hi ${greetingName(ex.intake.parent_contact)}, thank you for reaching out about ${child}. A member of our clinical team will contact you today to follow up and talk through next steps for an evaluation. We want to make sure ${child} gets the right support.`;
   await draft_message({
     recipient: target.recipient,
     channel: target.channel,
@@ -98,13 +133,23 @@ async function handleScheduling(item: InboxItem, ex: Extraction): Promise<Decisi
   // reschedule; the match result is threaded into the task so the front desk
   // knows whether identity still needs verifying.
   let patientNote = "";
+  let guardianOnRecord: string | null = null;
   if (ex.intake.dob_or_age?.match(/\d{4}-\d{2}-\d{2}/)) {
     const found = await search_patient({ name: child, dob: ex.intake.dob_or_age });
-    patientNote =
-      found.data.length > 0
-        ? ` Matched existing patient ${found.data[0].patient_id} (${found.data[0].status}).`
-        : " No existing patient match — front desk to confirm identity.";
+    if (found.data.length > 0) {
+      guardianOnRecord = found.data[0].guardian_name;
+      patientNote = ` Matched existing patient ${found.data[0].patient_id} (${found.data[0].status}).`;
+    } else {
+      patientNote = " No existing patient match — front desk to confirm identity.";
+    }
   }
+  // A caller asking to change an existing patient's appointment should reconcile
+  // with the guardian on record before the front desk acts on the request.
+  const claimedParent = parentName(ex.intake.parent_contact);
+  const identityConflict = !!guardianOnRecord && namesConflict(claimedParent, guardianOnRecord);
+  const identityFlag = identityConflict
+    ? `caller identity unverified: caller presents as "${claimedParent}" but the guardian on record is "${guardianOnRecord}"`
+    : null;
   await lookup_policy({ topic: "scheduling" });
   const sameDay = ex.signals.sameDay;
   const task = await create_task({
@@ -116,7 +161,15 @@ async function handleScheduling(item: InboxItem, ex: Extraction): Promise<Decisi
 
   const target = replyTarget(item, ex);
   const childFirst = ex.intake.child_name ? firstName(ex.intake.child_name) : "your child";
-  const body = `Hi ${firstName(ex.intake.parent_contact)}, thanks for letting us know ${childFirst} can't make the appointment. We've noted the cancellation and a front-desk team member will follow up to arrange a new time. Nothing has been rescheduled yet. We hope ${childFirst} feels better soon.`;
+  // Only wish a speedy recovery if the message actually mentions illness; and
+  // describe what the agent did (passed the request on) rather than asserting a
+  // cancellation the family did not request and the agent did not perform.
+  const ill =
+    /\b(threw up|throw(?:ing)? up|vomit|fever|sick|ill|unwell|not feeling well|under the weather|temperature|flu|cold|cough)\b/i.test(
+      item.body,
+    );
+  const illLine = ill ? ` We hope ${childFirst} feels better soon.` : "";
+  const body = `Hi ${greetingName(ex.intake.parent_contact)}, thanks for letting us know ${childFirst} can't make the appointment. We've passed this to our front-desk team, who will follow up to arrange a new time. Nothing has been changed or rescheduled yet.${illLine}`;
   await draft_message({
     recipient: target.recipient,
     channel: target.channel,
@@ -128,15 +181,20 @@ async function handleScheduling(item: InboxItem, ex: Extraction): Promise<Decisi
     classification: "scheduling",
     urgency: sameDay ? "P1" : "P2",
     requires_human_review: true,
-    missing_info: ex.missing.filter((m) => m === "child name"),
-    recommended_next_action:
-      "Front desk to contact the family and arrange a new appointment time. Do not auto-reschedule.",
+    missing_info: identityFlag
+      ? [...ex.missing.filter((m) => m === "child name"), identityFlag]
+      : ex.missing.filter((m) => m === "child name"),
+    recommended_next_action: identityConflict
+      ? `Verify the caller's identity and relationship to ${child} (claimed "${claimedParent}" vs guardian of record "${guardianOnRecord}") before discussing or changing this appointment; then front desk to contact the family and arrange a new time. Do not auto-reschedule.`
+      : "Front desk to contact the family and arrange a new appointment time. Do not auto-reschedule.",
     draft_reply: body,
     task_ids: [task.data.task_id],
     escalation: null,
-    decision_rationale: sameDay
-      ? "A same-day cancellation/reschedule is a P1 operational issue per scheduling policy. Agent notes the cancellation and routes to front desk; it does not schedule appointments."
-      : "Reschedule request without a same-day deadline; treated as normal scheduling (P2) and routed to front desk.",
+    decision_rationale: `${
+      sameDay
+        ? "A same-day reschedule is a P1 operational issue per scheduling policy. Agent records the request and routes to front desk; it does not schedule appointments."
+        : "Reschedule request without a same-day deadline; treated as normal scheduling (P2) and routed to front desk."
+    }${identityConflict ? ` Caller identity is unverified (claimed "${claimedParent}" vs guardian of record "${guardianOnRecord}"), flagged for the front desk before any change.` : ""}`,
   };
 }
 
@@ -152,7 +210,18 @@ async function handleClinicalQuestion(item: InboxItem, ex: Extraction): Promise<
   });
 
   const target = replyTarget(item, ex);
-  const body = `Hi ${firstName(ex.intake.parent_contact)}, thank you for reaching out about ${child}. We're not able to give clinical guidance by message, but a speech-language pathologist can look into your question. The best next step is a brief screening or evaluation, and a team member will follow up with options. Nothing has been booked yet.`;
+  // Name the clinician type only when the concern points to one; otherwise stay
+  // neutral rather than asserting a speech-language pathologist by default.
+  const discipline = ex.intake.discipline?.[0];
+  const clinician =
+    discipline === "OT"
+      ? "an occupational therapist"
+      : discipline === "PT"
+        ? "a physical therapist"
+        : discipline === "SLP"
+          ? "a speech-language pathologist"
+          : "one of our clinicians";
+  const body = `Hi ${greetingName(ex.intake.parent_contact)}, thank you for reaching out about ${child}. We're not able to give clinical guidance by message, but ${clinician} can look into your question. The best next step is a brief screening or evaluation, and a team member will follow up with options. Nothing has been booked yet.`;
   await draft_message({
     recipient: target.recipient,
     channel: target.channel,
@@ -213,18 +282,28 @@ async function handleNewReferral(item: InboxItem, ex: Extraction): Promise<Decis
   const language = ex.signals.spanish ? "es" : "en";
 
   let existing = false;
+  let guardianOnRecord: string | null = null;
   if (ex.intake.dob_or_age?.match(/\d{4}-\d{2}-\d{2}/)) {
     const found = await search_patient({ name: child, dob: ex.intake.dob_or_age });
     existing = found.data.length > 0;
+    guardianOnRecord = found.data[0]?.guardian_name ?? null;
   }
 
+  // Caller-identity check: if we matched an existing record, does the caller's
+  // claimed name reconcile with the guardian on file? A mismatch must be
+  // surfaced for staff and must hold back coverage details from the reply.
+  const claimedParent = parentName(ex.intake.parent_contact);
+  const identityConflict = existing && namesConflict(claimedParent, guardianOnRecord);
+
   let insuranceStatus: string = "unknown";
+  let authRequired = false;
   if (ex.intake.payer) {
     const ins = await verify_insurance({
       payer: ex.intake.payer,
       member_id: ex.intake.member_id || undefined,
     });
     insuranceStatus = ins.data.status;
+    authRequired = ins.data.auth_required === true;
   }
 
   if (ex.signals.spanish) await lookup_policy({ topic: "language_access" });
@@ -240,10 +319,16 @@ async function handleNewReferral(item: InboxItem, ex: Extraction): Promise<Decis
       due: dueDate(item, 2),
       notes: `${ex.intake.payer} returned ${insuranceStatus} for ${child}. Billing to call the family for a benefits conversation before any slot is held or scheduled.`,
     });
+    // Describe the actual verification result; expired coverage is not the same
+    // as out-of-network, and the Spanish copy must not collapse the two.
+    const enStatus =
+      insuranceStatus === "expired" ? "expired" : "out of network for Cedar Kids Therapy";
+    const esStatus =
+      insuranceStatus === "expired" ? "vencido" : "fuera de la red para Cedar Kids Therapy";
     const body = spanishOrEnglish(
       language,
-      `Hi ${firstName(ex.intake.parent_contact)}, thank you for ${child}'s referral. Our billing team needs to review the ${ex.intake.payer} plan, which appears to be ${insuranceStatus.replace(/_/g, " ")} for Cedar Kids Therapy, before we move forward. A team member will follow up with options. Nothing has been scheduled yet.`,
-      `Hola ${firstName(ex.intake.parent_contact)}, gracias por la referencia de ${child}. Nuestro equipo de facturación necesita revisar el plan ${ex.intake.payer}, que parece estar fuera de la red para Cedar Kids Therapy, antes de continuar. Un miembro de nuestro equipo le contactará con opciones. Todavía no hemos agendado ninguna cita.`,
+      `Hi ${greetingName(ex.intake.parent_contact)}, thank you for ${child}'s referral. Our billing team needs to review the ${ex.intake.payer} plan, which appears to be ${enStatus}, before we move forward. A team member will follow up with options. Nothing has been scheduled yet.`,
+      `Hola ${greetingName(ex.intake.parent_contact)}, gracias por la referencia de ${child}. Nuestro equipo de facturación necesita revisar el plan ${ex.intake.payer}, que parece estar ${esStatus}, antes de continuar. Un miembro de nuestro equipo le contactará con opciones. Todavía no hemos agendado ninguna cita.`,
     );
     await draft_message({ recipient: target.recipient, channel: target.channel, language, body });
     return {
@@ -263,12 +348,16 @@ async function handleNewReferral(item: InboxItem, ex: Extraction): Promise<Decis
   // In-network or unknown payer: surface availability for staff review.
   let slotNote = "no matching slots found";
   let heldNote = "";
+  // When the family asked for Spanish, find_slots is filtered to es-capable
+  // providers, so a returned slot is proof a Spanish-speaking provider exists.
+  let spanishProviderFound = false;
   const taskIds: string[] = [];
   if (discipline) {
     const slots = await find_slots({ discipline, language: ex.signals.spanish ? "es" : undefined });
     if (slots.data.length > 0) {
       const first = slots.data[0];
       slotNote = `earliest ${first.start} with ${first.provider_name}`;
+      spanishProviderFound = ex.signals.spanish;
       // Hold the earliest slot only for an established patient — reviewable, not scheduled.
       if (existing) {
         const hold = await hold_slot({
@@ -288,24 +377,63 @@ async function handleNewReferral(item: InboxItem, ex: Extraction): Promise<Decis
   });
   taskIds.push(task.data.task_id);
 
+  // Only assert verified in-network coverage when verify_insurance actually
+  // returned in_network AND the caller's identity is not in question; otherwise
+  // promise a confirmation rather than stating one.
+  const insuranceVerified = insuranceStatus === "in_network" && !identityConflict;
+  const enInsurance = insuranceVerified
+    ? `${ex.intake.payer} is verified as in-network. `
+    : ex.intake.payer
+      ? `We'll confirm your ${ex.intake.payer} coverage as part of intake. `
+      : "";
+  const esInsurance = insuranceVerified
+    ? `Su seguro ${ex.intake.payer} está verificado dentro de la red. `
+    : ex.intake.payer
+      ? `Confirmaremos su cobertura de ${ex.intake.payer} durante el proceso de admisión. `
+      : "";
+  // Only promise a Spanish-speaking provider if find_slots actually surfaced one.
+  const esProvider = spanishProviderFound ? ", con un proveedor que habla español" : "";
+
   const body = spanishOrEnglish(
     language,
-    `Hi ${firstName(ex.intake.parent_contact)}, thank you for ${child}'s referral for ${discipline ? DISCIPLINE_LABEL[discipline] : "therapy"}. ${ex.intake.payer ? `${ex.intake.payer} is verified as in-network. ` : ""}A member of our intake team will follow up to confirm availability for an evaluation. Nothing has been booked yet.`,
-    `Hola ${firstName(ex.intake.parent_contact)}, gracias por la referencia de ${child} para una evaluación de ${discipline === "SLP" ? "habla" : "terapia"}. ${ex.intake.payer ? `Su seguro ${ex.intake.payer} está verificado dentro de la red. ` : ""}Un miembro de nuestro equipo de admisión la contactará para coordinar una evaluación, con una proveedora que habla español. Todavía no hemos agendado ninguna cita.`,
+    `Hi ${greetingName(ex.intake.parent_contact)}, thank you for ${child}'s referral for ${discipline ? DISCIPLINE_LABEL[discipline] : "therapy"}. ${enInsurance}A member of our intake team will follow up to confirm availability for an evaluation. Nothing has been booked yet.`,
+    `Hola ${greetingName(ex.intake.parent_contact)}, gracias por la referencia de ${child} para una evaluación de ${discipline === "SLP" ? "habla" : "terapia"}. ${esInsurance}Un miembro de nuestro equipo de admisión la contactará para coordinar una evaluación${esProvider}. Todavía no hemos agendado ninguna cita.`,
   );
   await draft_message({ recipient: target.recipient, channel: target.channel, language, body });
+
+  const identityFlag = identityConflict
+    ? `caller identity unverified: caller presents as "${claimedParent}" but the guardian on record is "${guardianOnRecord}"`
+    : null;
+
+  // Surface verification gaps the tools returned but the reply does not assert:
+  // an unrecognized payer, and any prior-authorization requirement.
+  const coverageUnverified = !!ex.intake.payer && insuranceStatus === "unknown";
+  const verifyNotes: string[] = [];
+  if (coverageUnverified)
+    verifyNotes.push(`verify ${ex.intake.payer} coverage (billing did not recognize the payer)`);
+  if (authRequired) verifyNotes.push("obtain prior authorization");
+
+  const baseAction = identityConflict
+    ? `Verify the caller's identity and relationship to ${child} (claimed "${claimedParent}" vs guardian of record "${guardianOnRecord}") before sharing coverage details or scheduling; then intake to confirm discipline and offer evaluation times.`
+    : "Intake to confirm requested discipline and offer evaluation times; staff to schedule (and confirm any tentative hold).";
+
+  const missingExtra: string[] = [];
+  if (identityFlag) missingExtra.push(identityFlag);
+  if (coverageUnverified)
+    missingExtra.push(`insurance not verified (payer "${ex.intake.payer}" unrecognized by billing)`);
 
   return {
     classification: "new_referral",
     urgency: "P2",
     requires_human_review: true,
-    missing_info: ex.missing,
-    recommended_next_action:
-      "Intake to confirm requested discipline and offer evaluation times; staff to schedule (and confirm any tentative hold).",
+    missing_info: missingExtra.length ? [...ex.missing, ...missingExtra] : ex.missing,
+    recommended_next_action: verifyNotes.length
+      ? `${baseAction} Before scheduling: ${verifyNotes.join("; ")}.`
+      : baseAction,
     draft_reply: body,
     task_ids: taskIds,
     escalation: null,
-    decision_rationale: `New referral with sufficient intake data and ${insuranceStatus === "unknown" ? "an unverified" : insuranceStatus} payer status. Agent verified insurance, ${existing ? "matched an existing patient, " : ""}surfaced availability for staff review, and drafted a welcoming reply without booking or implying a booking.`,
+    decision_rationale: `New referral with sufficient intake data and ${insuranceStatus === "unknown" ? "an unverified" : insuranceStatus} payer status.${identityConflict ? ` Caller identity is unverified (claimed "${claimedParent}" vs guardian of record "${guardianOnRecord}"), so coverage was not confirmed in the reply and identity verification was flagged for staff.` : ""}${authRequired ? " Prior authorization is required before scheduling." : ""} Agent verified insurance, ${existing ? "matched an existing patient, " : ""}surfaced availability for staff review, and drafted a welcoming reply without booking or implying a booking.`,
   };
 }
 
